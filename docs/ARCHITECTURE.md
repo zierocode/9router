@@ -56,8 +56,7 @@ flowchart LR
         API[V1 Compatibility API\n/v1/*]
         DASH[Dashboard + Management API\n/api/*]
         CORE[SSE + Translation Core\nopen-sse + src/sse]
-        DB[(db.json)]
-        UDB[(usage.json + log.txt)]
+        DB[(data.sqlite)]
     end
 
     subgraph Upstreams[Upstream Providers]
@@ -79,7 +78,6 @@ flowchart LR
     API --> CORE
     DASH --> DB
     CORE --> DB
-    CORE --> UDB
 
     CORE --> P1
     CORE --> P2
@@ -137,15 +135,18 @@ Main flow modules:
 
 Primary state DB:
 
-- `src/lib/localDb.js`
-- file: `${DATA_DIR}/db.json` (or `~/.9router/db.json` when `DATA_DIR` is unset)
-- entities: providerConnections, providerNodes, modelAliases, combos, apiKeys, settings, pricing
+- `src/lib/db/` (SQLite adapters, schema, migrations, and repositories)
+- file: `${DATA_DIR}/db/data.sqlite` (or `~/.9router/db/data.sqlite` when `DATA_DIR` is unset)
+- entities: providerConnections, providerNodes, modelAliases, combos, apiKeys,
+  settings, pricing, usage history, and request details
 
-Usage DB:
+Legacy and auxiliary files:
 
-- `src/lib/usageDb.js`
-- files: `~/.9router/usage.json`, `~/.9router/log.txt`
-- note: currently independent from `DATA_DIR`
+- `src/lib/usageDb.js` is a compatibility shim over the SQLite usage
+  repositories; it is not a separate database.
+- `DATA_DIR/db.json` is a legacy migration input retained for compatibility,
+  not the current runtime store.
+- Optional translator/request debug sessions remain under `<repo>/logs/...`.
 
 ## 4) Auth + Security Surfaces
 
@@ -377,9 +378,9 @@ erDiagram
 
 Physical storage files:
 
-- main state: `${DATA_DIR}/db.json` (or `~/.9router/db.json`)
-- usage stats: `~/.9router/usage.json`
-- request log lines: `~/.9router/log.txt`
+- main state and usage history: `${DATA_DIR}/db/data.sqlite` (or
+  `~/.9router/db/data.sqlite`)
+- automatic database backups: `${DATA_DIR}/db/backups/`
 - optional translator/request debug sessions: `<repo>/logs/...`
 
 ## Deployment Topology
@@ -394,8 +395,7 @@ flowchart LR
     subgraph ContainerOrProcess[9Router Runtime]
         Next[Next.js Server\nPORT=20128]
         Core[SSE Core + Executors]
-        MainDB[(db.json)]
-        UsageDB[(usage.json/log.txt)]
+        MainDB[(data.sqlite)]
     end
 
     subgraph External[External Services]
@@ -408,7 +408,6 @@ flowchart LR
     Next --> Core
     Next --> MainDB
     Core --> MainDB
-    Core --> UsageDB
     Core --> Providers
     Next --> SyncCloud
 ```
@@ -515,8 +514,8 @@ Translations are selected dynamically based on source payload shape and provider
 Runtime visibility sources:
 
 - console logs from `src/sse/utils/logger.js`
-- per-request usage aggregates in `usage.json`
-- textual request status log in `log.txt`
+- per-request usage aggregates and request logs in the SQLite usage history
+  repositories
 - optional deep request/translation logs under `logs/` when `ENABLE_REQUEST_LOGS=true`
 - dashboard usage endpoints (`/api/usage/*`) for UI consumption
 
@@ -542,7 +541,8 @@ Environment variables actively used by code:
 
 ## Known Architectural Notes
 
-1. `usageDb` currently stores under `~/.9router` and does not follow `DATA_DIR`.
+1. `usageDb` is a compatibility shim over the SQLite repositories and follows
+   the primary `${DATA_DIR}/db/data.sqlite` location.
 2. `/api/v1/route.js` returns a static model list and is not the main models source used by `/v1/models`.
 3. Request logger writes full headers/body when enabled; treat log directory as sensitive.
 4. Cloud behavior depends on correct `NEXT_PUBLIC_BASE_URL` and cloud endpoint reachability.
